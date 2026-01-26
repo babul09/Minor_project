@@ -1,0 +1,7 @@
+# Build artifacts
+sdl-grid
+*.o
+
+# Mac/IDE files
+.DS_Store
+.vscode/
