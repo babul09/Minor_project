@@ -61,6 +61,7 @@ int main(int argc, char **argv) {
 
     Grid grid(rows, cols, cell_size);
     ParticleSystem ps(2000);
+    float circle_radius = 20.0f; /* used when placing collision circles with left click */
 
     Uint32 last_tick = SDL_GetTicks();
     bool running = true;
@@ -83,6 +84,15 @@ int main(int argc, char **argv) {
                 else if (k == SDLK_DOWN) { float gx, gy; ps.getGravity(gx, gy); gy += 50.0f; ps.setGravity(gx, gy); }
                 else if (k == SDLK_LEFT) { float gx, gy; ps.getGravity(gx, gy); gx -= 50.0f; ps.setGravity(gx, gy); }
                 else if (k == SDLK_RIGHT) { float gx, gy; ps.getGravity(gx, gy); gx += 50.0f; ps.setGravity(gx, gy); }
+            }
+            else if (e.type == SDL_MOUSEBUTTONDOWN) {
+                if (e.button.button == SDL_BUTTON_LEFT) {
+                    /* place a collision circle at mouse pos */
+                    ps.addCircle((float)e.button.x, (float)e.button.y, circle_radius);
+                } else if (e.button.button == SDL_BUTTON_RIGHT) {
+                    /* clear all circles */
+                    ps.clearCircles();
+                }
             }
         }
 
@@ -127,10 +137,16 @@ int main(int argc, char **argv) {
         if (ImGui::SliderFloat("Spawn rate", &sr, 0.0f, 2000.0f)) ps.setSpawnRate(sr);
         float pl = ps.getParticleLife();
         if (ImGui::SliderFloat("Particle life", &pl, 0.1f, 10.0f)) ps.setParticleLife(pl);
-        float gxx = gx, gyy = gy;
-        if (ImGui::SliderFloat2("Gravity", &gxx, -1000.0f, 1000.0f)) ps.setGravity(gxx, gyy);
+        float gvals[2] = { gx, gy };
+        if (ImGui::SliderFloat2("Gravity", gvals, -1000.0f, 1000.0f)) ps.setGravity(gvals[0], gvals[1]);
+        int psize_ui = ps.getParticleSize();
+        if (ImGui::SliderInt("Particle size", &psize_ui, 1, 64)) ps.setParticleSize(psize_ui);
+        if (ImGui::SliderFloat("Circle radius", &circle_radius, 5.0f, 200.0f)) { }
+        ImGui::Text("Collision circles: %d (Left click to place, Right click clears)", ps.circleCount());
         ImGui::Checkbox("Emitting", &ps.emitting);
         if (ImGui::Button("Clear")) ps.clear();
+        ImGui::SameLine();
+        if (ImGui::Button("Clear circles")) ps.clearCircles();
         ImGui::End();
 
         ImGui::Render();

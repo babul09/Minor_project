@@ -23,6 +23,16 @@ public:
     void setGravity(float gx, float gy) { gravityX = gx; gravityY = gy; }
     void getGravity(float &gx, float &gy) const { gx = gravityX; gy = gravityY; }
 
+    /* particle draw size in pixels */
+    void setParticleSize(int s) { particleSize = s; }
+    int getParticleSize() const { return particleSize; }
+
+    /* collision circles */
+    struct Circle { float x, y, r; };
+    void addCircle(float x, float y, float r) { circles.push_back({x,y,r}); }
+    void clearCircles() { circles.clear(); }
+    int circleCount() const { return (int)circles.size(); }
+
     void clear();
     void update(float dt, float emit_x, float emit_y);
     void render(SDL_Renderer *renderer, int psize);
@@ -31,12 +41,14 @@ public:
     bool emitting = true;
 
 private:
-    std::vector<Particle> particles;
     int maxParticles;
+    std::vector<Particle> particles;
     float spawnRate; /* per second */
     float spawnAcc;
     float particleLife;
     float gravityX, gravityY;
+    int particleSize; /* pixels */
+    std::vector<Circle> circles;
 
     void spawnOne(float emit_x, float emit_y);
 };
