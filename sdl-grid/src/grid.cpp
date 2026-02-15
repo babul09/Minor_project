@@ -1,5 +1,6 @@
 #include "grid.h"
 #include <algorithm>
+#include <cmath>
 
 Grid::Grid(int rows_, int cols_, int initialCellSize_)
     : rows(rows_), cols(cols_), initialCellSize(initialCellSize_) {}
@@ -17,18 +18,28 @@ GridRect Grid::computeGridRect(int win_w, int win_h) const {
     return r;
 }
 
-void Grid::draw(SDL_Renderer *renderer, int win_w, int win_h) {
+void Grid::draw(SDL_Renderer *renderer, int win_w, int win_h, float scale) {
     GridRect r = computeGridRect(win_w, win_h);
+    /* keep the grid centered while scaling */
+    float cx = r.x + r.w * 0.5f;
+    float cy = r.y + r.h * 0.5f;
+    int sw = std::max(1, (int)floorf(r.w * scale + 0.5f));
+    int sh = std::max(1, (int)floorf(r.h * scale + 0.5f));
+    int sx = (int)floorf(cx - sw * 0.5f + 0.5f);
+    int sy = (int)floorf(cy - sh * 0.5f + 0.5f);
+    int scs = std::max(1, (int)floorf(r.cellSize * scale + 0.5f));
+    GridRect sr = { sx, sy, sw, sh, scs };
+
     SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255);
     for (int i = 0; i <= rows; ++i) {
-        int y = r.y + i * r.cellSize;
-        SDL_RenderDrawLine(renderer, r.x, y, r.x + r.w, y);
+        int y = sr.y + i * sr.cellSize;
+        SDL_RenderDrawLine(renderer, sr.x, y, sr.x + sr.w, y);
     }
     for (int j = 0; j <= cols; ++j) {
-        int x = r.x + j * r.cellSize;
-        SDL_RenderDrawLine(renderer, x, r.y, x, r.y + r.h);
+        int x = sr.x + j * sr.cellSize;
+        SDL_RenderDrawLine(renderer, x, sr.y, x, sr.y + sr.h);
     }
-}
+} 
 
 float Grid::centerX(int win_w, int win_h) const {
     GridRect r = computeGridRect(win_w, win_h);

@@ -62,8 +62,9 @@ int main(int argc, char **argv) {
     float spawn_acc = 0.0f;
     float particle_life = 2.0f; /* seconds */
 
-    float gravity_x = 0.0f;
-    float gravity_y = 300.0f; /* px/s^2 downward */
+    /* base wind (replaces gravity) */
+    float wind_base_x = 0.0f;
+    float wind_base_y = 300.0f; /* px/s^2 downward (default matches previous gravity) */
 
     Uint32 last_tick = SDL_GetTicks();
     srand((unsigned int)time(NULL));
@@ -79,10 +80,10 @@ int main(int argc, char **argv) {
                     for (int i = 0; i < MAX_PARTICLES; ++i) particles[i].life = 0.0f;
                 } else if (k == SDLK_z) { spawn_rate = fmaxf(0.0f, spawn_rate - 50.0f); printf("spawn_rate=%.1f\n", spawn_rate); }
                 else if (k == SDLK_x) { spawn_rate += 50.0f; printf("spawn_rate=%.1f\n", spawn_rate); }
-                else if (k == SDLK_UP) { gravity_y -= 50.0f; printf("gravity=(%.1f,%.1f)\n", gravity_x, gravity_y); }
-                else if (k == SDLK_DOWN) { gravity_y += 50.0f; printf("gravity=(%.1f,%.1f)\n", gravity_x, gravity_y); }
-                else if (k == SDLK_LEFT) { gravity_x -= 50.0f; printf("gravity=(%.1f,%.1f)\n", gravity_x, gravity_y); }
-                else if (k == SDLK_RIGHT) { gravity_x += 50.0f; printf("gravity=(%.1f,%.1f)\n", gravity_x, gravity_y); }
+                else if (k == SDLK_UP) { wind_base_y -= 50.0f; printf("wind=(%.1f,%.1f)\n", wind_base_x, wind_base_y); }
+                else if (k == SDLK_DOWN) { wind_base_y += 50.0f; printf("wind=(%.1f,%.1f)\n", wind_base_x, wind_base_y); }
+                else if (k == SDLK_LEFT) { wind_base_x -= 50.0f; printf("wind=(%.1f,%.1f)\n", wind_base_x, wind_base_y); }
+                else if (k == SDLK_RIGHT) { wind_base_x += 50.0f; printf("wind=(%.1f,%.1f)\n", wind_base_x, wind_base_y); }
             }
         }
 
@@ -135,11 +136,11 @@ int main(int argc, char **argv) {
             }
         }
 
-        /* update particles */
+        /* update particles (apply uniform wind) */
         for (int i = 0; i < MAX_PARTICLES; ++i) {
             if (particles[i].life > 0.0f) {
-                particles[i].vx += gravity_x * dt;
-                particles[i].vy += gravity_y * dt;
+                particles[i].vx += wind_base_x * dt;
+                particles[i].vy += wind_base_y * dt;
                 particles[i].x += particles[i].vx * dt;
                 particles[i].y += particles[i].vy * dt;
                 particles[i].life -= dt;
@@ -170,12 +171,12 @@ int main(int argc, char **argv) {
             }
         }
 
-        /* draw gravity vector */
+        /* draw wind vector (visual) */
         SDL_SetRenderDrawColor(renderer, 255, 255, 100, 255);
         float gv_scale = 0.05f; /* visual scale */
-        int gx = (int)(emit_x + gravity_x * gv_scale);
-        int gy = (int)(emit_y + gravity_y * gv_scale);
-        SDL_RenderDrawLine(renderer, (int)emit_x, (int)emit_y, gx, gy);
+        int wx = (int)(emit_x + wind_base_x * gv_scale);
+        int wy = (int)(emit_y + wind_base_y * gv_scale);
+        SDL_RenderDrawLine(renderer, (int)emit_x, (int)emit_y, wx, wy);
 
         SDL_RenderPresent(renderer);
         SDL_Delay(16); /* ~60 FPS */
