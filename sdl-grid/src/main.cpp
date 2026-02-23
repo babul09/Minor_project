@@ -1,11 +1,8 @@
 #include <SDL2/SDL.h>
-#include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <time.h>
 #include <cmath>
 #include <algorithm>
 #include <vector>
+#include <iostream>
 
 #include "grid.h"
 #include "particle.h"
@@ -16,39 +13,58 @@
 #include "backends/imgui_impl_sdlrenderer2.h"
 #endif
 
-/* small helper: draw an arrow from (x,y) by vector (vx,vy) */
-static void drawArrow(SDL_Renderer *renderer, int x, int y, float vx, float vy) {
-    float len = sqrtf(vx*vx + vy*vy);
-    if (len < 1e-4f) return;
-    float nx = vx / len;
-    float ny = vy / len;
-    int ex = (int)floorf(x + vx + 0.5f);
-    int ey = (int)floorf(y + vy + 0.5f);
-    SDL_RenderDrawLine(renderer, x, y, ex, ey);
-    /* arrow head */
-    float ah = std::min(8.0f, len * 0.35f);
-    float hx1 = ex - nx * ah + -ny * (ah * 0.5f);
-    float hy1 = ey - ny * ah + nx * (ah * 0.5f);
-    float hx2 = ex - nx * ah - -ny * (ah * 0.5f);
-    float hy2 = ey - ny * ah - nx * (ah * 0.5f);
-    SDL_RenderDrawLine(renderer, ex, ey, (int)floorf(hx1+0.5f), (int)floorf(hy1+0.5f));
-    SDL_RenderDrawLine(renderer, ex, ey, (int)floorf(hx2+0.5f), (int)floorf(hy2+0.5f));
+namespace {
+    constexpr float EPSILON = 1e-4f;
+    constexpr float ARROW_HEAD_SCALE = 0.35f;
+    constexpr float ARROW_HEAD_MAX = 8.0f;
+    constexpr float ARROW_HEAD_WIDTH = 0.5f;
 }
 
-/* draw a circle outline (approximated by line segments) */
+// Helper function: draw an arrow from (x,y) by vector (vx,vy)
+static void drawArrow(SDL_Renderer *renderer, int x, int y, float vx, float vy) {
+    const float len = std::sqrt(vx * vx + vy * vy);
+    if (len < EPSILON) return;
+    
+    const float nx = vx / len;
+    const float ny = vy / len;
+    const int ex = static_cast<int>(std::floor(x + vx + 0.5f));
+    const int ey = static_cast<int>(std::floor(y + vy + 0.5f));
+    
+    SDL_RenderDrawLine(renderer, x, y, ex, ey);
+    
+    // Arrow head
+    const float ah = std::min(ARROW_HEAD_MAX, len * ARROW_HEAD_SCALE);
+    const float hx1 = ex - nx * ah - ny * (ah * ARROW_HEAD_WIDTH);
+    const float hy1 = ey - ny * ah + nx * (ah * ARROW_HEAD_WIDTH);
+    const float hx2 = ex - nx * ah + ny * (ah * ARROW_HEAD_WIDTH);
+    const float hy2 = ey - ny * ah - nx * (ah * ARROW_HEAD_WIDTH);
+    
+    SDL_RenderDrawLine(renderer, ex, ey, static_cast<int>(std::floor(hx1 + 0.5f)), static_cast<int>(std::floor(hy1 + 0.5f)));
+    SDL_RenderDrawLine(renderer, ex, ey, static_cast<int>(std::floor(hx2 + 0.5f)), static_cast<int>(std::floor(hy2 + 0.5f)));
+}
+
+// Helper function: draw a circle outline (approximated by line segments)
 static void drawCircleOutline(SDL_Renderer *renderer, int cx, int cy, int r) {
     if (r <= 0) return;
-    int segments = std::max(12, std::min(64, r * 2));
+    
+    constexpr float PI = 3.14159265358979323846f;
+    constexpr int MIN_SEGMENTS = 12;
+    constexpr int MAX_SEGMENTS = 64;
+    
+    const int segments = std::clamp(r * 2, MIN_SEGMENTS, MAX_SEGMENTS);
+    const float dtheta = 2.0f * PI / static_cast<float>(segments);
+    
     float theta = 0.0f;
-    float dtheta = 2.0f * 3.14159265358979323846f / (float)segments;
-    int prev_x = cx + (int)floorf(r * cosf(theta) + 0.5f);
-    int prev_y = cy + (int)floorf(r * sinf(theta) + 0.5f);
+    int prev_x = cx + static_cast<int>(std::floor(r * std::cos(theta) + 0.5f));
+    int prev_y = cy + static_cast<int>(std::floor(r * std::sin(theta) + 0.5f));
+    
     for (int i = 1; i <= segments; ++i) {
         theta += dtheta;
-        int nx = cx + (int)floorf(r * cosf(theta) + 0.5f);
-        int ny = cy + (int)floorf(r * sinf(theta) + 0.5f);
+        const int nx = cx + static_cast<int>(std::floor(r * std::cos(theta) + 0.5f));
+        const int ny = cy + static_cast<int>(std::floor(r * std::sin(theta) + 0.5f));
         SDL_RenderDrawLine(renderer, prev_x, prev_y, nx, ny);
-        prev_x = nx; prev_y = ny;
+        prev_x = nx;
+        prev_y = ny;
     }
 }
 
@@ -58,34 +74,43 @@ int main(int argc, char **argv) {
     int cell_size = 24;
 
     if (argc >= 4) {
-        rows = atoi(argv[1]);
-        cols = atoi(argv[2]);
-        cell_size = atoi(argv[3]);
-        if (rows <= 0 || cols <= 0 || cell_size <= 0) {
-            fprintf(stderr, "Invalid args. Usage: %s [rows cols cell_size]\n", argv[0]);
+        try {
+            rows = std::stoi(argv[1]);
+            cols = std::stoi(argv[2]);
+            cell_size = std::stoi(argv[3]);
+            if (rows <= 0 || cols <= 0 || cell_size <= 0) {
+                throw std::invalid_argument("Values must be positive");
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "Invalid args. Usage: " << argv[0] << " [rows cols cell_size]\n";
+            std::cerr << "Error: " << e.what() << "\n";
             return 1;
         }
     }
 
-    int window_w = cols * cell_size;
-    int window_h = rows * cell_size;
+    const int window_w = cols * cell_size;
+    const int window_h = rows * cell_size;
 
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
-        fprintf(stderr, "SDL_Init Error: %s\n", SDL_GetError());
+        std::cerr << "SDL_Init Error: " << SDL_GetError() << "\n";
         return 1;
     }
 
-    SDL_Window *window = SDL_CreateWindow("SDL Grid - Particles", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, window_w, window_h, SDL_WINDOW_RESIZABLE | SDL_WINDOW_SHOWN);
+    SDL_Window* window = SDL_CreateWindow("SDL Grid - Particles", 
+                                           SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 
+                                           window_w, window_h, 
+                                           SDL_WINDOW_RESIZABLE | SDL_WINDOW_SHOWN);
     if (!window) {
-        fprintf(stderr, "SDL_CreateWindow Error: %s\n", SDL_GetError());
+        std::cerr << "SDL_CreateWindow Error: " << SDL_GetError() << "\n";
         SDL_Quit();
         return 1;
     }
 
-    SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, 
+                                                SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     if (!renderer) {
         SDL_DestroyWindow(window);
-        fprintf(stderr, "SDL_CreateRenderer Error: %s\n", SDL_GetError());
+        std::cerr << "SDL_CreateRenderer Error: " << SDL_GetError() << "\n";
         SDL_Quit();
         return 1;
     }
@@ -98,30 +123,32 @@ int main(int argc, char **argv) {
     ImGui_ImplSDLRenderer2_Init(renderer);
 #endif
 
+    // Initialize grid and particle system
     Grid grid(rows, cols, cell_size);
     ParticleSystem ps(2000);
-    float circle_radius = 20.0f; /* used when placing collision circles with left click */
-    float view_scale = 1.0f; /* visual zoom scale (1.0 = 100%) */
+    
+    // Simulation parameters
+    float circle_radius = 20.0f;      // Radius for placing collision circles
+    float view_scale = 1.0f;          // Visual zoom scale (1.0 = 100%)
     bool showWindField = true;
-    float wind_vis_scale = 0.05f; /* visual multiplier for wind arrows */
+    float wind_vis_scale = 0.05f;     // Visual multiplier for wind arrows
 
-    /* accumulation / heatmap */
+    // Accumulation / heatmap settings
     bool showAccumulation = false;
     bool accumAutoScale = true;
-    float accumMaxDisplay = 50.0f; /* manual max if auto-scale off */
-    float accumDecay = 1.0f; /* per-second decay */
+    float accumMaxDisplay = 50.0f;    // Manual max if auto-scale is off
+    float accumDecay = 1.0f;          // Per-second decay rate
 
-    /* emitter UI & interaction state */
+    // Emitter UI & interaction state
     bool emitterSettingsOpen = false;
     float emitterWindowPosX = 100.0f, emitterWindowPosY = 100.0f;
-    /* emitter world position (start centered in grid) */
-    float emitterX = grid.centerX(window_w, window_h);
+    float emitterX = grid.centerX(window_w, window_h);  // Emitter world position
     float emitterY = grid.centerY(window_w, window_h);
     bool draggingEmitter = false;
     bool emitterWasDragged = false;
-    bool emitterEditMode = false; /* E to toggle; arrows move when enabled */
+    bool emitterEditMode = false;     // E to toggle; arrows move when enabled
 
-    /* accumulation buffers sized to the configured grid */
+    // Accumulation buffers sized to the configured grid
     std::vector<float> accum(rows * cols, 0.0f);
     std::vector<int> cellCounts(rows * cols, 0);
 
@@ -170,36 +197,39 @@ int main(int argc, char **argv) {
             }
             else if (e.type == SDL_MOUSEBUTTONDOWN) {
                 if (e.button.button == SDL_BUTTON_LEFT) {
-                    /* map from screen -> world so it respects zoom */
-                    int tmp_w, tmp_h; SDL_GetWindowSize(window, &tmp_w, &tmp_h);
-                    float cx_tmp = grid.centerX(tmp_w, tmp_h);
-                    float cy_tmp = grid.centerY(tmp_w, tmp_h);
-                    float world_x = (e.button.x - cx_tmp) / view_scale + cx_tmp;
-                    float world_y = (e.button.y - cy_tmp) / view_scale + cy_tmp;
+                    // Map from screen to world coordinates (respects zoom)
+                    int tmp_w, tmp_h; 
+                    SDL_GetWindowSize(window, &tmp_w, &tmp_h);
+                    const float cx_tmp = grid.centerX(tmp_w, tmp_h);
+                    const float cy_tmp = grid.centerY(tmp_w, tmp_h);
+                    const float world_x = (e.button.x - cx_tmp) / view_scale + cx_tmp;
+                    const float world_y = (e.button.y - cy_tmp) / view_scale + cy_tmp;
 
-                    /* start dragging emitter if click is near it */
-                    float dx_e = world_x - emitterX;
-                    float dy_e = world_y - emitterY;
-                    float clickThresh = std::max(8.0f, ps.getEmitterRadius() * 0.5f);
-                    if (!ImGui::GetIO().WantCaptureMouse && (dx_e*dx_e + dy_e*dy_e) < (clickThresh * clickThresh)) {
+                    // Start dragging emitter if click is near it
+                    const float dx_e = world_x - emitterX;
+                    const float dy_e = world_y - emitterY;
+                    const float clickThresh = std::max(8.0f, ps.getEmitterRadius() * 0.5f);
+                    
+                    if (!ImGui::GetIO().WantCaptureMouse && (dx_e * dx_e + dy_e * dy_e) < (clickThresh * clickThresh)) {
                         draggingEmitter = true;
                         emitterWasDragged = false;
                     } else if (!ImGui::GetIO().WantCaptureMouse) {
-                        /* place a collision circle */
+                        // Place a collision circle
                         ps.addCircle(world_x, world_y, circle_radius);
                     }
                 } else if (e.button.button == SDL_BUTTON_RIGHT) {
-                    /* clear all circles */
+                    // Clear all circles
                     ps.clearCircles();
                 }
             }
             else if (e.type == SDL_MOUSEMOTION) {
                 if (draggingEmitter && (e.motion.state & SDL_BUTTON_LMASK)) {
-                    int tmp_w, tmp_h; SDL_GetWindowSize(window, &tmp_w, &tmp_h);
-                    float cx_tmp = grid.centerX(tmp_w, tmp_h);
-                    float cy_tmp = grid.centerY(tmp_w, tmp_h);
-                    float world_x = (e.motion.x - cx_tmp) / view_scale + cx_tmp;
-                    float world_y = (e.motion.y - cy_tmp) / view_scale + cy_tmp;
+                    int tmp_w, tmp_h; 
+                    SDL_GetWindowSize(window, &tmp_w, &tmp_h);
+                    const float cx_tmp = grid.centerX(tmp_w, tmp_h);
+                    const float cy_tmp = grid.centerY(tmp_w, tmp_h);
+                    const float world_x = (e.motion.x - cx_tmp) / view_scale + cx_tmp;
+                    const float world_y = (e.motion.y - cy_tmp) / view_scale + cy_tmp;
                     emitterX = world_x;
                     emitterY = world_y;
                     emitterWasDragged = true;
@@ -209,10 +239,10 @@ int main(int argc, char **argv) {
                 if (e.button.button == SDL_BUTTON_LEFT && draggingEmitter) {
                     draggingEmitter = false;
                     if (!emitterWasDragged) {
-                        /* treat as a click: open popup */
+                        // Treat as a click: open popup
                         emitterSettingsOpen = !emitterSettingsOpen;
-                        emitterWindowPosX = (float)e.button.x;
-                        emitterWindowPosY = (float)e.button.y;
+                        emitterWindowPosX = static_cast<float>(e.button.x);
+                        emitterWindowPosY = static_cast<float>(e.button.y);
                     }
                 }
             }
@@ -220,7 +250,8 @@ int main(int argc, char **argv) {
 
         Uint32 now = SDL_GetTicks();
         float dt = (now - last_tick) / 1000.0f;
-        if (dt > 0.05f) dt = 0.05f;
+        constexpr float MAX_DT = 0.05f;
+        if (dt > MAX_DT) dt = MAX_DT;  // Clamp to avoid large time steps
         last_tick = now;
 
         SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255);
@@ -229,82 +260,94 @@ int main(int argc, char **argv) {
         int win_w, win_h;
         SDL_GetWindowSize(window, &win_w, &win_h);
 
-        /* emitter position (can be moved/dragged) */
-        /* emitterX/emitterY initialized once; keep using them */
+        // Update emitter position and particle system
         ps.setWindCenter(emitterX, emitterY);
         ps.update(dt, emitterX, emitterY);
 
         grid.draw(renderer, win_w, win_h, view_scale);
 
-        /* bold grid boundary */
+        // Draw bold grid boundary
         GridRect baseR = grid.computeGridRect(win_w, win_h);
-        float gcx = baseR.x + baseR.w * 0.5f;
-        float gcy = baseR.y + baseR.h * 0.5f;
-        int scaled_w = std::max(1, (int)floorf(baseR.w * view_scale + 0.5f));
-        int scaled_h = std::max(1, (int)floorf(baseR.h * view_scale + 0.5f));
-        int scaled_x = (int)floorf(gcx - scaled_w * 0.5f + 0.5f);
-        int scaled_y = (int)floorf(gcy - scaled_h * 0.5f + 0.5f);
+        const float gcx = baseR.x + baseR.w * 0.5f;
+        const float gcy = baseR.y + baseR.h * 0.5f;
+        const int scaled_w = std::max(1, static_cast<int>(std::floor(baseR.w * view_scale + 0.5f)));
+        const int scaled_h = std::max(1, static_cast<int>(std::floor(baseR.h * view_scale + 0.5f)));
+        const int scaled_x = static_cast<int>(std::floor(gcx - scaled_w * 0.5f + 0.5f));
+        const int scaled_y = static_cast<int>(std::floor(gcy - scaled_h * 0.5f + 0.5f));
+        
         SDL_SetRenderDrawColor(renderer, 180, 180, 180, 255);
         SDL_Rect brect = { scaled_x, scaled_y, scaled_w, scaled_h };
-        /* draw two rects for bolder boundary */
+        // Draw two rects for bolder boundary
         SDL_RenderDrawRect(renderer, &brect);
-        SDL_Rect brect2 = { scaled_x+1, scaled_y+1, scaled_w-2, scaled_h-2 };
+        SDL_Rect brect2 = { scaled_x + 1, scaled_y + 1, scaled_w - 2, scaled_h - 2 };
         SDL_RenderDrawRect(renderer, &brect2);
 
-        /* accumulation heatmap (decay + sample particle positions) */
+        // Accumulation heatmap (decay + sample particle positions)
         if (showAccumulation) {
-            /* decay */
-            float decayFactor = expf(-accumDecay * dt);
+            // Apply exponential decay
+            const float decayFactor = std::exp(-accumDecay * dt);
             float maxVal = 1e-6f;
-            for (size_t i = 0; i < accum.size(); ++i) { accum[i] *= decayFactor; }
+            for (auto& val : accum) {
+                val *= decayFactor;
+            }
 
-            /* sample particle counts into cellCounts */
+            // Sample particle counts into cellCounts
             ps.accumulateGrid(baseR, rows, cols, cellCounts);
-            for (size_t i = 0; i < cellCounts.size(); ++i) { accum[i] += (float)cellCounts[i]; if (accum[i] > maxVal) maxVal = accum[i]; }
+            for (size_t i = 0; i < cellCounts.size(); ++i) {
+                accum[i] += static_cast<float>(cellCounts[i]);
+                if (accum[i] > maxVal) maxVal = accum[i];
+            }
 
-            /* determine normalization */
-            float normMax = accumAutoScale ? maxVal : fmaxf(1.0f, accumMaxDisplay);
-            normMax = fmaxf(normMax, 1e-6f);
+            // Determine normalization
+            const float normMax = std::max((accumAutoScale ? maxVal : std::max(1.0f, accumMaxDisplay)), 1e-6f);
 
-            /* draw overlay cells */
+            // Draw overlay cells
             SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-            float cx = grid.centerX(win_w, win_h);
-            float cy = grid.centerY(win_w, win_h);
+            const float cx = grid.centerX(win_w, win_h);
+            const float cy = grid.centerY(win_w, win_h);
+            
             for (int r = 0; r < rows; ++r) {
                 for (int c = 0; c < cols; ++c) {
-                    float world_x = (float)(baseR.x + c * baseR.cellSize);
-                    float world_y = (float)(baseR.y + r * baseR.cellSize);
-                    float sw = (float)baseR.cellSize * view_scale;
-                    float sh = (float)baseR.cellSize * view_scale;
-                    int sx = (int)floorf((world_x - cx) * view_scale + cx + 0.5f);
-                    int sy = (int)floorf((world_y - cy) * view_scale + cy + 0.5f);
-                    int sw_int = std::max(1, (int)floorf(sw + 0.5f));
-                    int sh_int = std::max(1, (int)floorf(sh + 0.5f));
-                    float val = accum[r * cols + c] / normMax;
+                    const float world_x = static_cast<float>(baseR.x + c * baseR.cellSize);
+                    const float world_y = static_cast<float>(baseR.y + r * baseR.cellSize);
+                    const float sw = static_cast<float>(baseR.cellSize) * view_scale;
+                    const float sh = static_cast<float>(baseR.cellSize) * view_scale;
+                    const int sx = static_cast<int>(std::floor((world_x - cx) * view_scale + cx + 0.5f));
+                    const int sy = static_cast<int>(std::floor((world_y - cy) * view_scale + cy + 0.5f));
+                    const int sw_int = std::max(1, static_cast<int>(std::floor(sw + 0.5f)));
+                    const int sh_int = std::max(1, static_cast<int>(std::floor(sh + 0.5f)));
+                    
+                    const float val = accum[r * cols + c] / normMax;
                     if (val <= 0.001f) continue;
-                    /* heat color: hue 240 (blue) -> 0 (red) */
-                    float hue = (1.0f - fminf(1.0f, val)) * 240.0f; /* degrees */
-                    float s = 1.0f, vcol = 1.0f;
-                    /* convert HSV to RGB (quick) */
-                    float h = hue / 60.0f;
-                    int ih = (int)floorf(h) % 6;
-                    float fpart = h - floorf(h);
-                    float p = vcol * (1.0f - s);
-                    float q = vcol * (1.0f - s * fpart);
-                    float t = vcol * (1.0f - s * (1.0f - fpart));
+                    
+                    // Heat color mapping: hue 240 (blue) -> 0 (red)
+                    const float hue = (1.0f - std::min(1.0f, val)) * 240.0f;  // degrees
+                    constexpr float saturation = 1.0f;
+                    constexpr float value = 1.0f;
+                    
+                    // Convert HSV to RGB
+                    const float h = hue / 60.0f;
+                    const int ih = static_cast<int>(std::floor(h)) % 6;
+                    const float fpart = h - std::floor(h);
+                    const float p = value * (1.0f - saturation);
+                    const float q = value * (1.0f - saturation * fpart);
+                    const float t = value * (1.0f - saturation * (1.0f - fpart));
+                    
                     float rf, gf, bf;
                     switch (ih) {
-                        case 0: rf = vcol; gf = t; bf = p; break;
-                        case 1: rf = q; gf = vcol; bf = p; break;
-                        case 2: rf = p; gf = vcol; bf = t; break;
-                        case 3: rf = p; gf = q; bf = vcol; break;
-                        case 4: rf = t; gf = p; bf = vcol; break;
-                        default: rf = vcol; gf = p; bf = q; break;
+                        case 0: rf = value; gf = t; bf = p; break;
+                        case 1: rf = q; gf = value; bf = p; break;
+                        case 2: rf = p; gf = value; bf = t; break;
+                        case 3: rf = p; gf = q; bf = value; break;
+                        case 4: rf = t; gf = p; bf = value; break;
+                        default: rf = value; gf = p; bf = q; break;
                     }
-                    Uint8 R = (Uint8)(fminf(1.0f, rf) * 255.0f);
-                    Uint8 G = (Uint8)(fminf(1.0f, gf) * 255.0f);
-                    Uint8 B = (Uint8)(fminf(1.0f, bf) * 255.0f);
-                    Uint8 A = (Uint8)(fminf(0.9f, val) * 180.0f);
+                    
+                    const Uint8 R = static_cast<Uint8>(std::min(1.0f, rf) * 255.0f);
+                    const Uint8 G = static_cast<Uint8>(std::min(1.0f, gf) * 255.0f);
+                    const Uint8 B = static_cast<Uint8>(std::min(1.0f, bf) * 255.0f);
+                    const Uint8 A = static_cast<Uint8>(std::min(0.9f, val) * 180.0f);
+                    
                     SDL_SetRenderDrawColor(renderer, R, G, B, A);
                     SDL_Rect cellRect = { sx, sy, sw_int, sh_int };
                     SDL_RenderFillRect(renderer, &cellRect);
@@ -312,57 +355,66 @@ int main(int argc, char **argv) {
             }
         }
 
-        /* wind field visualization (sample the grid and draw little arrows) */
+        // Wind field visualization (sample the grid and draw arrows)
         if (showWindField) {
             GridRect vr = baseR;
             SDL_SetRenderDrawColor(renderer, 120, 200, 120, 255);
-            float cx = grid.centerX(win_w, win_h);
-            float cy = grid.centerY(win_w, win_h);
-            int step = std::max(1, vr.cellSize * 2);
-            for (int yy = vr.y + vr.cellSize/2; yy < vr.y + vr.h; yy += step) {
-                for (int xx = vr.x + vr.cellSize/2; xx < vr.x + vr.w; xx += step) {
-                    float world_x = (float)xx; /* computeGridRect returns world coords */
-                    float world_y = (float)yy;
-                    float fx, fy; ps.getWindAt(world_x, world_y, fx, fy);
-                    float end_world_x = world_x + fx * wind_vis_scale;
-                    float end_world_y = world_y + fy * wind_vis_scale;
-                    int sx = (int)floorf((world_x - cx) * view_scale + cx + 0.5f);
-                    int sy = (int)floorf((world_y - cy) * view_scale + cy + 0.5f);
-                    int ex = (int)floorf((end_world_x - cx) * view_scale + cx + 0.5f);
-                    int ey = (int)floorf((end_world_y - cy) * view_scale + cy + 0.5f);
-                    drawArrow(renderer, sx, sy, (float)(ex - sx), (float)(ey - sy));
+            const float cx = grid.centerX(win_w, win_h);
+            const float cy = grid.centerY(win_w, win_h);
+            const int step = std::max(1, vr.cellSize * 2);
+            
+            for (int yy = vr.y + vr.cellSize / 2; yy < vr.y + vr.h; yy += step) {
+                for (int xx = vr.x + vr.cellSize / 2; xx < vr.x + vr.w; xx += step) {
+                    const float world_x = static_cast<float>(xx);
+                    const float world_y = static_cast<float>(yy);
+                    
+                    float fx, fy; 
+                    ps.getWindAt(world_x, world_y, fx, fy);
+                    
+                    const float end_world_x = world_x + fx * wind_vis_scale;
+                    const float end_world_y = world_y + fy * wind_vis_scale;
+                    const int sx = static_cast<int>(std::floor((world_x - cx) * view_scale + cx + 0.5f));
+                    const int sy = static_cast<int>(std::floor((world_y - cy) * view_scale + cy + 0.5f));
+                    const int ex = static_cast<int>(std::floor((end_world_x - cx) * view_scale + cx + 0.5f));
+                    const int ey = static_cast<int>(std::floor((end_world_y - cy) * view_scale + cy + 0.5f));
+                    
+                    drawArrow(renderer, sx, sy, static_cast<float>(ex - sx), static_cast<float>(ey - sy));
                 }
             }
         }
 
         GridRect gr = grid.computeGridRect(win_w, win_h);
-        int cs = std::max(1, (int)floorf(gr.cellSize * view_scale + 0.5f));
-        int psize = std::max(1, cs / 6); /* make particles smaller */
+        const int cs = std::max(1, static_cast<int>(std::floor(gr.cellSize * view_scale + 0.5f)));
+        const int psize = std::max(1, cs / 6);  // Make particles smaller
         ps.render(renderer, psize, view_scale, grid.centerX(win_w, win_h), grid.centerY(win_w, win_h));
 
-        /* wind vector at emitter (visualized) */
-        float wx_e, wy_e; ps.getWindAt(emitterX, emitterY, wx_e, wy_e);
+        // Draw wind vector at emitter location
+        float wx_e, wy_e; 
+        ps.getWindAt(emitterX, emitterY, wx_e, wy_e);
         SDL_SetRenderDrawColor(renderer, 255, 255, 100, 255);
-        float cx = grid.centerX(win_w, win_h);
-        float cy = grid.centerY(win_w, win_h);
-        int sx_emit_x = (int)floorf((emitterX - cx) * view_scale + cx + 0.5f);
-        int sx_emit_y = (int)floorf((emitterY - cy) * view_scale + cy + 0.5f);
-        float end_world_x = emitterX + wx_e * wind_vis_scale;
-        float end_world_y = emitterY + wy_e * wind_vis_scale;
-        int sx_end_x = (int)floorf((end_world_x - cx) * view_scale + cx + 0.5f);
-        int sx_end_y = (int)floorf((end_world_y - cy) * view_scale + cy + 0.5f);
+        
+        const float cx = grid.centerX(win_w, win_h);
+        const float cy = grid.centerY(win_w, win_h);
+        const int sx_emit_x = static_cast<int>(std::floor((emitterX - cx) * view_scale + cx + 0.5f));
+        const int sx_emit_y = static_cast<int>(std::floor((emitterY - cy) * view_scale + cy + 0.5f));
+        const float end_world_x = emitterX + wx_e * wind_vis_scale;
+        const float end_world_y = emitterY + wy_e * wind_vis_scale;
+        const int sx_end_x = static_cast<int>(std::floor((end_world_x - cx) * view_scale + cx + 0.5f));
+        const int sx_end_y = static_cast<int>(std::floor((end_world_y - cy) * view_scale + cy + 0.5f));
         SDL_RenderDrawLine(renderer, sx_emit_x, sx_emit_y, sx_end_x, sx_end_y);
 
-        /* draw emitter radius boundary + center marker */
+        // Draw emitter radius boundary + center marker
         SDL_SetRenderDrawColor(renderer, 200, 120, 120, 255);
-        int emitter_sr_screen = std::max(1, (int)floorf(ps.getEmitterRadius() * view_scale + 0.5f));
+        const int emitter_sr_screen = std::max(1, static_cast<int>(std::floor(ps.getEmitterRadius() * view_scale + 0.5f)));
         drawCircleOutline(renderer, sx_emit_x, sx_emit_y, emitter_sr_screen);
-        /* small filled center */
+        
+        // Small filled center
         SDL_SetRenderDrawColor(renderer, 220, 80, 80, 255);
         SDL_Rect er = { sx_emit_x - 3, sx_emit_y - 3, 6, 6 };
         SDL_RenderFillRect(renderer, &er);
+        
         if (emitterEditMode) {
-            /* highlight when edit mode active */
+            // Highlight when edit mode is active
             SDL_SetRenderDrawColor(renderer, 255, 200, 120, 255);
             drawCircleOutline(renderer, sx_emit_x, sx_emit_y, emitter_sr_screen + 4);
         }
@@ -393,9 +445,15 @@ int main(int argc, char **argv) {
             if (ImGui::Button("Center = emitter")) ps.setWindCenter(emitterX, emitterY);
         } else if (wind_mode_ui == ParticleSystem::WIND_NOISE) {
             float a, sc, sp; ps.getNoiseParams(a, sc, sp);
-            if (ImGui::SliderFloat("Noise amplitude", &a, 0.0f, 1000.0f)) ;
-            if (ImGui::SliderFloat("Noise scale", &sc, 0.001f, 0.1f)) ;
-            if (ImGui::SliderFloat("Noise speed", &sp, 0.0f, 10.0f)) ;
+            if (ImGui::SliderFloat("Noise amplitude", &a, 0.0f, 1000.0f)) {
+                // value updated via reference
+            }
+            if (ImGui::SliderFloat("Noise scale", &sc, 0.001f, 0.1f)) {
+                // value updated via reference
+            }
+            if (ImGui::SliderFloat("Noise speed", &sp, 0.0f, 10.0f)) {
+                // value updated via reference
+            }
             ps.setNoiseParams(a, sc, sp);
         }
         ImGui::Checkbox("Show wind field", &showWindField);

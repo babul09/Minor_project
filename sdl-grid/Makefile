@@ -1,5 +1,6 @@
 CXX = g++
-CXXFLAGS = -std=c++17 -Wall -O2 `sdl2-config --cflags`
+# Use C++17 standard; add extra warnings and optimization
+CXXFLAGS = -std=c++17 -Wall -Wextra -pedantic -O2 `sdl2-config --cflags`
 LDFLAGS = `sdl2-config --libs` -lm
 
 # ImGui configuration (you can override these on the make command line)
@@ -17,12 +18,15 @@ CXXFLAGS += $(IMGUI_INCLUDES)
 SRC = src/main.cpp src/grid.cpp src/particle.cpp $(IMGUI_SRCS)
 TARGET = sdl-grid
 
+# Remove generated object files on clean
+
 all: $(TARGET)
 
 $(TARGET): $(SRC)
 	$(CXX) $(CXXFLAGS) $(IMGUI_DEFINES) -o $@ $^ $(LDFLAGS)
 
 clean:
+	# remove built executable and any object files
 	rm -f $(TARGET) *.o
 
 .PHONY: all clean
