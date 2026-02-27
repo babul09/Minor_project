@@ -15,7 +15,7 @@ endif
 # Add ImGui include flags if provided
 CXXFLAGS += $(IMGUI_INCLUDES)
 
-SRC = src/main.cpp src/grid.cpp src/particle.cpp $(IMGUI_SRCS)
+SRC = src/main.cpp src/grid.cpp src/particle.cpp src/boundary.cpp $(IMGUI_SRCS)
 TARGET = sdl-grid
 
 # Remove generated object files on clean

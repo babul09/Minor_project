@@ -6,6 +6,7 @@
 
 #include "grid.h"
 #include "particle.h"
+#include "boundary.h"
 
 #ifdef USE_IMGUI
 #include "imgui.h"
@@ -126,6 +127,12 @@ int main(int argc, char **argv) {
     // Initialize grid and particle system
     Grid grid(rows, cols, cell_size);
     ParticleSystem ps(2000);
+    Boundary boundary(rows, cols);  // containment boundary for particles
+
+    // boundary editing state
+    bool boundaryEditMode = false;
+    bool draggingBoundary = false;
+    bool boundaryMarkValue = true; // true: mark, false: unmark
     
     // Simulation parameters
     float circle_radius = 20.0f;      // Radius for placing collision circles
@@ -196,7 +203,7 @@ int main(int argc, char **argv) {
                 }
             }
             else if (e.type == SDL_MOUSEBUTTONDOWN) {
-                if (e.button.button == SDL_BUTTON_LEFT) {
+                if (e.button.button == SDL_BUTTON_LEFT || e.button.button == SDL_BUTTON_RIGHT) {
                     // Map from screen to world coordinates (respects zoom)
                     int tmp_w, tmp_h; 
                     SDL_GetWindowSize(window, &tmp_w, &tmp_h);
@@ -205,25 +212,36 @@ int main(int argc, char **argv) {
                     const float world_x = (e.button.x - cx_tmp) / view_scale + cx_tmp;
                     const float world_y = (e.button.y - cy_tmp) / view_scale + cy_tmp;
 
-                    // Start dragging emitter if click is near it
-                    const float dx_e = world_x - emitterX;
-                    const float dy_e = world_y - emitterY;
-                    const float clickThresh = std::max(8.0f, ps.getEmitterRadius() * 0.5f);
-                    
-                    if (!ImGui::GetIO().WantCaptureMouse && (dx_e * dx_e + dy_e * dy_e) < (clickThresh * clickThresh)) {
-                        draggingEmitter = true;
-                        emitterWasDragged = false;
-                    } else if (!ImGui::GetIO().WantCaptureMouse) {
-                        // Place a collision circle
-                        ps.addCircle(world_x, world_y, circle_radius);
+                    if (boundaryEditMode && !ImGui::GetIO().WantCaptureMouse) {
+                        // start marking or clearing boundary cells
+                        draggingBoundary = true;
+                        boundaryMarkValue = (e.button.button == SDL_BUTTON_LEFT);
+                        int r, c;
+                        if (boundary.cellAt(world_x, world_y, grid.computeGridRect(tmp_w, tmp_h), r, c)) {
+                            boundary.setCell(r, c, boundaryMarkValue);
+                        }
+                    } else {
+                        // Handle emitter / circle placement as before
+                        const float dx_e = world_x - emitterX;
+                        const float dy_e = world_y - emitterY;
+                        const float clickThresh = std::max(8.0f, ps.getEmitterRadius() * 0.5f);
+                        
+                        if (!ImGui::GetIO().WantCaptureMouse && (dx_e * dx_e + dy_e * dy_e) < (clickThresh * clickThresh)) {
+                            draggingEmitter = true;
+                            emitterWasDragged = false;
+                        } else if (!ImGui::GetIO().WantCaptureMouse && e.button.button == SDL_BUTTON_LEFT) {
+                            // Place a collision circle
+                            ps.addCircle(world_x, world_y, circle_radius);
+                        }
                     }
-                } else if (e.button.button == SDL_BUTTON_RIGHT) {
-                    // Clear all circles
+                }
+                // right button clears circles when not in boundary mode
+                if (!boundaryEditMode && e.button.button == SDL_BUTTON_RIGHT) {
                     ps.clearCircles();
                 }
             }
             else if (e.type == SDL_MOUSEMOTION) {
-                if (draggingEmitter && (e.motion.state & SDL_BUTTON_LMASK)) {
+                if (draggingEmitter && (e.motion.state & SDL_BUTTON_LMASK) && !boundaryEditMode) {
                     int tmp_w, tmp_h; 
                     SDL_GetWindowSize(window, &tmp_w, &tmp_h);
                     const float cx_tmp = grid.centerX(tmp_w, tmp_h);
@@ -233,6 +251,18 @@ int main(int argc, char **argv) {
                     emitterX = world_x;
                     emitterY = world_y;
                     emitterWasDragged = true;
+                }
+                if (draggingBoundary && (e.motion.state & (SDL_BUTTON_LMASK | SDL_BUTTON_RMASK))) {
+                    int tmp_w, tmp_h;
+                    SDL_GetWindowSize(window, &tmp_w, &tmp_h);
+                    const float cx_tmp = grid.centerX(tmp_w, tmp_h);
+                    const float cy_tmp = grid.centerY(tmp_w, tmp_h);
+                    const float world_x = (e.motion.x - cx_tmp) / view_scale + cx_tmp;
+                    const float world_y = (e.motion.y - cy_tmp) / view_scale + cy_tmp;
+                    int r, c;
+                    if (boundary.cellAt(world_x, world_y, grid.computeGridRect(tmp_w, tmp_h), r, c)) {
+                        boundary.setCell(r, c, boundaryMarkValue);
+                    }
                 }
             }
             else if (e.type == SDL_MOUSEBUTTONUP) {
@@ -244,6 +274,9 @@ int main(int argc, char **argv) {
                         emitterWindowPosX = static_cast<float>(e.button.x);
                         emitterWindowPosY = static_cast<float>(e.button.y);
                     }
+                }
+                if ((e.button.button == SDL_BUTTON_LEFT || e.button.button == SDL_BUTTON_RIGHT) && draggingBoundary) {
+                    draggingBoundary = false;
                 }
             }
         }
@@ -260,14 +293,16 @@ int main(int argc, char **argv) {
         int win_w, win_h;
         SDL_GetWindowSize(window, &win_w, &win_h);
 
-        // Update emitter position and particle system
+        // Compute grid rectangle once per frame
+        GridRect baseR = grid.computeGridRect(win_w, win_h);
+
+        // Update emitter position and particle system (respecting boundary)
         ps.setWindCenter(emitterX, emitterY);
-        ps.update(dt, emitterX, emitterY);
+        ps.update(dt, emitterX, emitterY, boundary, baseR);
 
         grid.draw(renderer, win_w, win_h, view_scale);
 
         // Draw bold grid boundary
-        GridRect baseR = grid.computeGridRect(win_w, win_h);
         const float gcx = baseR.x + baseR.w * 0.5f;
         const float gcy = baseR.y + baseR.h * 0.5f;
         const int scaled_w = std::max(1, static_cast<int>(std::floor(baseR.w * view_scale + 0.5f)));
@@ -281,6 +316,9 @@ int main(int argc, char **argv) {
         SDL_RenderDrawRect(renderer, &brect);
         SDL_Rect brect2 = { scaled_x + 1, scaled_y + 1, scaled_w - 2, scaled_h - 2 };
         SDL_RenderDrawRect(renderer, &brect2);
+
+        // draw any user-defined containment boundary
+        boundary.render(renderer, baseR, view_scale, grid.centerX(win_w, win_h), grid.centerY(win_w, win_h));
 
         // Accumulation heatmap (decay + sample particle positions)
         if (showAccumulation) {
@@ -467,6 +505,14 @@ int main(int argc, char **argv) {
         ImGui::Checkbox("Auto-scale heatmap", &accumAutoScale);
         if (!accumAutoScale) ImGui::SliderFloat("Heatmap max", &accumMaxDisplay, 1.0f, 500.0f);
         ImGui::SliderFloat("Accumulation decay (1/s)", &accumDecay, 0.0f, 10.0f);
+
+        // Boundary editing controls
+        ImGui::Separator();
+        ImGui::Text("Boundary");
+        ImGui::Checkbox("Boundary edit mode", &boundaryEditMode);
+        ImGui::SameLine();
+        if (ImGui::Button("Clear boundary")) boundary.clear();
+        ImGui::Text("Cells selected: %d", boundary.selectedCount());
 
         int psize_ui = ps.getParticleSize();
         if (ImGui::SliderInt("Particle size", &psize_ui, 1, 64)) ps.setParticleSize(psize_ui);

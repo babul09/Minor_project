@@ -163,7 +163,8 @@ void ParticleSystem::getWindAt(float x, float y, float& wx, float& wy) const {
     }
 }
 
-void ParticleSystem::update(float dt, float emit_x, float emit_y) {
+void ParticleSystem::update(float dt, float emit_x, float emit_y,
+                                 const Boundary& boundary, const GridRect& gridRect) {
     // Spawn particles if emitting
     if (emitting && spawnRate > 0.0f) {
         const float to_spawn = spawnRate * dt + spawnAcc;
@@ -180,12 +181,34 @@ void ParticleSystem::update(float dt, float emit_x, float emit_y) {
     // Update all active particles
     for (int i = 0; i < maxParticles; ++i) {
         if (particles[i].life > 0.0f) {
-            float wx, wy; 
+            float wx, wy;
             getWindAt(particles[i].x, particles[i].y, wx, wy);
             particles[i].vx += wx * dt;
             particles[i].vy += wy * dt;
+
+            // remember old position for collision response
+            const float oldx = particles[i].x;
+            const float oldy = particles[i].y;
             particles[i].x += particles[i].vx * dt;
             particles[i].y += particles[i].vy * dt;
+
+            // boundary containment: keep particle inside selected cells
+            if (!boundary.contains(particles[i].x, particles[i].y, gridRect)) {
+                int oldR, oldC;
+                bool dummy = boundary.cellAt(oldx, oldy, gridRect, oldR, oldC);
+                (void)dummy; // suppress nodiscard warning
+                int newR, newC;
+                if (boundary.cellAt(particles[i].x, particles[i].y, gridRect, newR, newC)) {
+                    if (newR != oldR) particles[i].vy = -particles[i].vy;
+                    if (newC != oldC) particles[i].vx = -particles[i].vx;
+                } else {
+                    // went outside grid entirely
+                    particles[i].vx = -particles[i].vx;
+                    particles[i].vy = -particles[i].vy;
+                }
+                particles[i].x = oldx;
+                particles[i].y = oldy;
+            }
 
             // Simple circle collisions: reflect velocity when inside a circle
             for (const auto& c : circles) {

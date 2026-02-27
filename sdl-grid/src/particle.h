@@ -4,6 +4,7 @@
 #include <SDL2/SDL.h>
 #include <vector>
 #include "grid.h"  // For GridRect used by accumulateGrid
+#include "boundary.h"  // needed for update() signature
 
 // Particle structure representing a single particle in the system
 struct Particle {
@@ -82,7 +83,10 @@ public:
 
     // Core simulation methods
     void clear() noexcept;
-    void update(float dt, float emit_x, float emit_y);
+    // dt: time step, emit_x/emit_y: emitter world position
+    // boundary: containment region, gridRect used to map positions to cells
+    void update(float dt, float emit_x, float emit_y,
+                const Boundary& boundary, const GridRect& gridRect);
     
     // Render with view scale and center for proper zoom support
     void render(SDL_Renderer* renderer, int psize, float scale = 1.0f, 
