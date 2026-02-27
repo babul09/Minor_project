@@ -22,6 +22,21 @@ TARGET = sdl-grid
 
 all: $(TARGET)
 
+setup:
+	@echo "Installing dependencies..."
+	@if [ -f /etc/debian_version ]; then \
+		echo "Detected Debian/Ubuntu system."; \
+		sudo apt-get update && sudo apt-get install -y build-essential libsdl2-dev libsdl2-image-dev libcurl4-openssl-dev pkg-config make; \
+	elif [ -f /etc/arch-release ]; then \
+		echo "Detected Arch Linux system."; \
+		sudo pacman -Sy --noconfirm base-devel sdl2 sdl2_image curl pkgconf make; \
+	elif [ -f /etc/fedora-release ]; then \
+		echo "Detected Fedora system."; \
+		sudo dnf install -y @development-tools SDL2-devel SDL2_image-devel libcurl-devel pkgconf-pkg-config make; \
+	else \
+		echo "Unsupported OS. Please install SDL2, SDL2_image, libcurl, pkg-config, and make manually."; \
+	fi
+
 $(TARGET): $(SRC)
 	$(CXX) $(CXXFLAGS) $(IMGUI_DEFINES) -o $@ $^ $(LDFLAGS)
 
