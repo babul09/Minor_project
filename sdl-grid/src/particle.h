@@ -43,14 +43,19 @@ public:
     wy = windBaseY;
   }
 
-  // Real-world wind control
-  void setRealWind(float u, float v) noexcept {
-    realWindU = u;
-    realWindV = v;
+  // Real-world 3x3 wind control
+  void setRealWindGrid(const std::vector<float> &uMap,
+                       const std::vector<float> &vMap, int gridWidth,
+                       int gridHeight) noexcept {
+    realWindUGrid = uMap;
+    realWindVGrid = vMap;
+    rwGridWidth = gridWidth;
+    rwGridHeight = gridHeight;
   }
-  void getRealWind(float &u, float &v) const noexcept {
-    u = realWindU;
-    v = realWindV;
+  void getRealWind(std::vector<float> &uMap,
+                   std::vector<float> &vMap) const noexcept {
+    uMap = realWindUGrid;
+    vMap = realWindVGrid;
   }
 
   void setWindMode(int mode) noexcept { windMode = mode; }
@@ -156,8 +161,12 @@ private:
   float windCenterX, windCenterY;               // For vortex mode
   float noiseAmplitude, noiseScale, noiseSpeed; // Noise mode params
   float windPhase;                              // Time accumulator for noise
-  float realWindU;                              // Real-world Wind U vector
-  float realWindV;                              // Real-world Wind V vector
+
+  // 3x3 Wind Field Grid
+  std::vector<float> realWindUGrid;
+  std::vector<float> realWindVGrid;
+  int rwGridWidth = 0;
+  int rwGridHeight = 0;
 
   // Emitter parameters
   float emitterSpeedMin, emitterSpeedMax;

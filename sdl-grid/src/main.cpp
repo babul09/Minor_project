@@ -180,7 +180,7 @@ int main(int argc, char **argv) {
 
   // API State and UI
   double locLat = 37.7749, locLon = -122.4194; // Default: San Francisco
-  int mapZoom = 12;
+  int mapZoom = 15; // Set higher default zoom for "college campus" feel
   std::string wmApiKey = "";
   std::string aqApiKey = "";
   std::string mbApiKey = "";
@@ -380,16 +380,26 @@ int main(int argc, char **argv) {
                                   std::future_status::ready) {
       currentWind = windFuture.get();
       if (currentWind.valid) {
-        float rad = currentWind.degree * (3.14159265f / 180.0f);
-        // Meteorological wind direction: direction wind is blowing FROM.
-        float windScale = 20.0f; // Adjusted scale to make it look organic
-        float u = currentWind.speed * -std::sin(rad) * windScale;
-        float v = currentWind.speed * std::cos(rad) * windScale;
-        ps.setRealWind(u, v);
+        float zoomScaleFactor = std::pow(2.0f, mapZoom - 12.0f);
+        float windScale = 20.0f * zoomScaleFactor;
+
+        std::vector<float> uGrid;
+        std::vector<float> vGrid;
+        for (size_t i = 0; i < currentWind.speeds.size(); ++i) {
+          float rad = currentWind.degrees[i] * (3.14159265f / 180.0f);
+          uGrid.push_back(currentWind.speeds[i] * -std::sin(rad) * windScale);
+          vGrid.push_back(currentWind.speeds[i] * std::cos(rad) * windScale);
+        }
+
+        ps.setRealWindGrid(uGrid, vGrid, win_w, win_h);
         if (ps.getWindMode() != ParticleSystem::WIND_REALWORLD)
           ps.setWindMode(ParticleSystem::WIND_REALWORLD);
-        std::cout << "Wind loaded: " << currentWind.speed << "m/s at "
-                  << currentWind.degree << "deg\n";
+
+        if (!currentWind.speeds.empty()) {
+          std::cout << "Wind Grid loaded! Center node: "
+                    << currentWind.speeds[4] << "m/s at "
+                    << currentWind.degrees[4] << "deg\n";
+        }
       } else {
         std::cerr << "Wind API Error: " << currentWind.errorMessage << "\n";
       }
@@ -433,7 +443,20 @@ int main(int argc, char **argv) {
     SDL_RenderClear(renderer);
 
     if (mapLoaded && mapTexture) {
-      SDL_Rect dst = {0, 0, win_w, win_h};
+      int w, h;
+      SDL_QueryTexture(mapTexture, NULL, NULL, &w, &h);
+
+      const float cx = win_w * 0.5f;
+      const float cy = win_h * 0.5f;
+
+      int scaled_w =
+          std::max(1, static_cast<int>(std::floor(w * view_scale + 0.5f)));
+      int scaled_h =
+          std::max(1, static_cast<int>(std::floor(h * view_scale + 0.5f)));
+      int scaled_x = static_cast<int>(std::floor(cx - scaled_w * 0.5f + 0.5f));
+      int scaled_y = static_cast<int>(std::floor(cy - scaled_h * 0.5f + 0.5f));
+
+      SDL_Rect dst = {scaled_x, scaled_y, scaled_w, scaled_h};
       SDL_RenderCopy(renderer, mapTexture, NULL, &dst);
     }
 
@@ -698,9 +721,13 @@ int main(int argc, char **argv) {
       }
       ps.setNoiseParams(a, sc, sp);
     } else if (wind_mode_ui == ParticleSystem::WIND_REALWORLD) {
-      float u, v;
+      std::vector<float> u, v;
       ps.getRealWind(u, v);
-      ImGui::Text("Real-World Wind: U=%.1f, V=%.1f", u, v);
+      if (u.size() >= 5) {
+        ImGui::Text("Real-World Wind: U=%.1f, V=%.1f", u[4], v[4]);
+      } else if (!u.empty()) {
+        ImGui::Text("Real-World Wind: U=%.1f, V=%.1f", u[0], v[0]);
+      }
     }
     ImGui::Checkbox("Show wind field", &showWindField);
 
@@ -721,18 +748,30 @@ int main(int argc, char **argv) {
     ImGui::InputText("Mapbox Key", mbKeyBuf, IM_ARRAYSIZE(mbKeyBuf));
     ImGui::InputDouble("Lat", &locLat);
     ImGui::InputDouble("Lon", &locLon);
+    ImGui::InputInt("Zoom Level (0-22)", &mapZoom);
+    if (mapZoom < 0)
+      mapZoom = 0;
+    if (mapZoom > 22)
+      mapZoom = 22;
+
     if (ImGui::Button("Fetch Data")) {
       wmApiKey = wmKeyBuf;
       aqApiKey = aqKeyBuf;
       mbApiKey = mbKeyBuf;
-      windFuture = ApiClient::fetchWindDataAsync(locLat, locLon, wmApiKey);
+
+      std::vector<double> gridLats;
+      std::vector<double> gridLons;
+      CoordinateTransformer::calculateGridCoordinates(
+          locLat, locLon, mapZoom, win_w, win_h, gridLats, gridLons);
+
+      windFuture = ApiClient::fetchWindDataGridAsync(gridLats, gridLons);
       polFuture = ApiClient::fetchPollutionDataAsync(locLat, locLon, aqApiKey);
       mapFuture = ApiClient::fetchMapImageAsync(locLat, locLon, win_w, win_h,
                                                 mapZoom, mbApiKey);
     }
-    if (currentWind.valid)
-      ImGui::Text("Wind: %.1fm/s %.1f deg", currentWind.speed,
-                  currentWind.degree);
+    if (currentWind.valid && !currentWind.speeds.empty())
+      ImGui::Text("Center Wind: %.1fm/s %.1f deg", currentWind.speeds[4],
+                  currentWind.degrees[4]);
     else if (!currentWind.errorMessage.empty())
       ImGui::TextColored(ImVec4(1, 0, 0, 1), "Wind Err: %s",
                          currentWind.errorMessage.c_str());

@@ -106,9 +106,9 @@ ParticleSystem::ParticleSystem(int maxParticles_)
       spawnAcc(0.0f), particleLife(2.0f), windBaseX(0.0f), windBaseY(300.0f),
       windMode(WIND_UNIFORM), windStrength(200.0f), windCenterX(0.0f),
       windCenterY(0.0f), noiseAmplitude(50.0f), noiseScale(0.01f),
-      noiseSpeed(1.0f), windPhase(0.0f), realWindU(0.0f), realWindV(0.0f),
-      emitterSpeedMin(50.0f), emitterSpeedMax(250.0f), emitterSpread(TWO_PI),
-      emitterDirection(0.0f), emitterRadius(6.0f), particleSize(2) {
+      noiseSpeed(1.0f), windPhase(0.0f), emitterSpeedMin(50.0f),
+      emitterSpeedMax(250.0f), emitterSpread(TWO_PI), emitterDirection(0.0f),
+      emitterRadius(6.0f), particleSize(2) {
   for (auto &particle : particles) {
     particle.life = 0.0f;
   }
@@ -171,13 +171,54 @@ void ParticleSystem::getWindAt(float x, float y, float &wx, float &wy) const {
     break;
   }
   case WIND_REALWORLD: {
+    // Default fallback if we don't have a 3x3 grid yet
+    float baseU = 0.0f;
+    float baseV = 0.0f;
+
+    if (realWindUGrid.size() == 9 && rwGridWidth > 0 && rwGridHeight > 0) {
+      // Find normalized position (0.0 to 1.0) along screen map
+      float normX =
+          std::max(0.0f, std::min(1.0f, x / static_cast<float>(rwGridWidth)));
+      float normY =
+          std::max(0.0f, std::min(1.0f, y / static_cast<float>(rwGridHeight)));
+
+      // Maps 0.0-1.0 to the 2 grid segments (0-1, 1-2)
+      float gridX = normX * 2.0f;
+      float gridY = normY * 2.0f;
+
+      int x0 = std::min(1, static_cast<int>(gridX));
+      int x1 = x0 + 1;
+      int y0 = std::min(1, static_cast<int>(gridY));
+      int y1 = y0 + 1;
+
+      float tx = gridX - x0;
+      float ty = gridY - y0;
+
+      // Lookup u, v in the 3x3 1D array (row-major: y * 3 + x)
+      auto getU = [&](int _x, int _y) { return realWindUGrid[_y * 3 + _x]; };
+      auto getV = [&](int _x, int _y) { return realWindVGrid[_y * 3 + _x]; };
+
+      // Bilinear interpolation for U
+      float uTop = getU(x0, y0) * (1.0f - tx) + getU(x1, y0) * tx;
+      float uBottom = getU(x0, y1) * (1.0f - tx) + getU(x1, y1) * tx;
+      baseU = uTop * (1.0f - ty) + uBottom * ty;
+
+      // Bilinear interpolation for V
+      float vTop = getV(x0, y0) * (1.0f - tx) + getV(x1, y0) * tx;
+      float vBottom = getV(x0, y1) * (1.0f - tx) + getV(x1, y1) * tx;
+      baseV = vTop * (1.0f - ty) + vBottom * ty;
+    } else if (realWindUGrid.size() == 1) { // Single point fallback
+      baseU = realWindUGrid[0];
+      baseV = realWindVGrid[0];
+    }
+
     // Add turbulence using Perlin noise
     const float nx = x * noiseScale;
     const float ny = y * noiseScale;
     const float v1 = perlin2(nx + windPhase * 0.7f, ny);
     const float v2 = perlin2(nx + 100.0f, ny + windPhase * 0.7f);
-    wx = realWindU + (v1 * noiseAmplitude);
-    wy = realWindV + (v2 * noiseAmplitude);
+    wx = baseU + (v1 * noiseAmplitude);
+    wy = baseV + (v2 * noiseAmplitude);
     break;
   }
   case WIND_UNIFORM:
