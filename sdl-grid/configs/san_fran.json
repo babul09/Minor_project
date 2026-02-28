@@ -1,0 +1,21 @@
+{
+    "accumAutoScale": true,
+    "accumDecay": 1.0,
+    "accumMaxDisplay": 50.0,
+    "locLat": 37.7749,
+    "locLon": -122.4194,
+    "mapZoom": 15,
+    "ps": {
+        "noiseAmpli": 50.0,
+        "noiseScale": 0.009999999776482582,
+        "noiseSpeed": 1.0,
+        "particleLife": 1.00600004196167,
+        "spawnRate": 2000.0,
+        "windMode": 3,
+        "windStrength": 200.0
+    },
+    "showAccumulation": true,
+    "showWindField": true,
+    "view_scale": 1.0,
+    "wind_vis_scale": 0.05000000074505806
+}

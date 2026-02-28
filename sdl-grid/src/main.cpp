@@ -1,10 +1,14 @@
 #include <SDL2/SDL.h>
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
+
+using json = nlohmann::json;
 
 #include "api_client.h"
 #include "boundary.h"
@@ -732,20 +736,124 @@ int main(int argc, char **argv) {
     ImGui::Checkbox("Show wind field", &showWindField);
 
     ImGui::Separator();
-    ImGui::Text("Real-World API Control");
-    static char wmKeyBuf[128] = "";
-    static char aqKeyBuf[128] = "";
-    static char mbKeyBuf[128] = "";
-    static bool keysInit = false;
-    if (!keysInit) {
-      strncpy(wmKeyBuf, wmApiKey.c_str(), sizeof(wmKeyBuf) - 1);
-      strncpy(aqKeyBuf, aqApiKey.c_str(), sizeof(aqKeyBuf) - 1);
-      strncpy(mbKeyBuf, mbApiKey.c_str(), sizeof(mbKeyBuf) - 1);
-      keysInit = true;
+    ImGui::Text("Saved Configurations");
+    static char configFilenameBuf[128] = "example";
+    ImGui::InputText("Filename", configFilenameBuf,
+                     IM_ARRAYSIZE(configFilenameBuf));
+    if (ImGui::Button("Save Config")) {
+      std::string path = "configs/" + std::string(configFilenameBuf) + ".json";
+      json j;
+      j["locLat"] = locLat;
+      j["locLon"] = locLon;
+      j["mapZoom"] = mapZoom;
+      j["view_scale"] = view_scale;
+      j["showWindField"] = showWindField;
+      j["wind_vis_scale"] = wind_vis_scale;
+      j["showAccumulation"] = showAccumulation;
+      j["accumAutoScale"] = accumAutoScale;
+      j["accumMaxDisplay"] = accumMaxDisplay;
+      j["accumDecay"] = accumDecay;
+
+      j["ps"]["spawnRate"] = ps.getSpawnRate();
+      j["ps"]["particleLife"] = ps.getParticleLife();
+      j["ps"]["windMode"] = ps.getWindMode();
+      j["ps"]["windStrength"] = ps.getWindStrength();
+      float a, sc, sp;
+      ps.getNoiseParams(a, sc, sp);
+      j["ps"]["noiseAmpli"] = a;
+      j["ps"]["noiseScale"] = sc;
+      j["ps"]["noiseSpeed"] = sp;
+
+      std::ofstream o(path);
+      o << std::setw(4) << j << std::endl;
+      std::cout << "Saved config to " << path << "\n";
     }
-    ImGui::InputText("OpenWeatherMap Key", wmKeyBuf, IM_ARRAYSIZE(wmKeyBuf));
-    ImGui::InputText("OpenAQ Key", aqKeyBuf, IM_ARRAYSIZE(aqKeyBuf));
-    ImGui::InputText("Mapbox Key", mbKeyBuf, IM_ARRAYSIZE(mbKeyBuf));
+    ImGui::SameLine();
+    if (ImGui::Button("Load Config")) {
+      std::string path = "configs/" + std::string(configFilenameBuf) + ".json";
+      std::ifstream i(path);
+      if (i.is_open()) {
+        json j;
+        i >> j;
+        locLat = j.value("locLat", locLat);
+        locLon = j.value("locLon", locLon);
+        mapZoom = j.value("mapZoom", mapZoom);
+        view_scale = j.value("view_scale", view_scale);
+        showWindField = j.value("showWindField", showWindField);
+        wind_vis_scale = j.value("wind_vis_scale", wind_vis_scale);
+        showAccumulation = j.value("showAccumulation", showAccumulation);
+        accumAutoScale = j.value("accumAutoScale", accumAutoScale);
+        accumMaxDisplay = j.value("accumMaxDisplay", accumMaxDisplay);
+        accumDecay = j.value("accumDecay", accumDecay);
+
+        if (j.contains("ps")) {
+          ps.setSpawnRate(j["ps"].value("spawnRate", ps.getSpawnRate()));
+          ps.setParticleLife(
+              j["ps"].value("particleLife", ps.getParticleLife()));
+          ps.setWindMode(j["ps"].value("windMode", ps.getWindMode()));
+          ps.setWindStrength(
+              j["ps"].value("windStrength", ps.getWindStrength()));
+          float a, sc, sp;
+          ps.getNoiseParams(a, sc, sp);
+          a = j["ps"].value("noiseAmpli", a);
+          sc = j["ps"].value("noiseScale", sc);
+          sp = j["ps"].value("noiseSpeed", sp);
+          ps.setNoiseParams(a, sc, sp);
+        }
+
+        // Auto-fetch data
+        std::vector<double> gridLats;
+        std::vector<double> gridLons;
+        CoordinateTransformer::calculateGridCoordinates(
+            locLat, locLon, mapZoom, win_w, win_h, gridLats, gridLons);
+        windFuture = ApiClient::fetchWindDataGridAsync(gridLats, gridLons);
+        polFuture =
+            ApiClient::fetchPollutionDataAsync(locLat, locLon, aqApiKey);
+        mapFuture = ApiClient::fetchMapImageAsync(locLat, locLon, win_w, win_h,
+                                                  mapZoom, mbApiKey);
+        std::cout << "Loaded config from " << path << "\n";
+      } else {
+        std::cerr << "Failed to open config file: " << path << "\n";
+      }
+    }
+
+    // File Dropdown
+    static std::vector<std::string> recentConfigs;
+    static std::string selectedConfig = "";
+    if (ImGui::BeginCombo("Recent Configs", selectedConfig.c_str())) {
+      recentConfigs.clear();
+      if (std::filesystem::exists("configs")) {
+        std::vector<std::filesystem::path> files;
+        for (const auto &entry :
+             std::filesystem::directory_iterator("configs")) {
+          if (entry.path().extension() == ".json") {
+            files.push_back(entry.path());
+          }
+        }
+        std::sort(
+            files.begin(), files.end(),
+            [](const std::filesystem::path &a, const std::filesystem::path &b) {
+              return std::filesystem::last_write_time(a) >
+                     std::filesystem::last_write_time(b);
+            });
+        for (size_t k = 0; k < std::min<size_t>(5, files.size()); ++k) {
+          recentConfigs.push_back(files[k].stem().string());
+        }
+      }
+      for (const auto &name : recentConfigs) {
+        bool is_selected = (selectedConfig == name);
+        if (ImGui::Selectable(name.c_str(), is_selected)) {
+          selectedConfig = name;
+          strncpy(configFilenameBuf, name.c_str(),
+                  sizeof(configFilenameBuf) - 1);
+        }
+        if (is_selected)
+          ImGui::SetItemDefaultFocus();
+      }
+      ImGui::EndCombo();
+    }
+    ImGui::Separator();
+    ImGui::Text("Real-World API Control");
     ImGui::InputDouble("Lat", &locLat);
     ImGui::InputDouble("Lon", &locLon);
     ImGui::InputInt("Zoom Level (0-22)", &mapZoom);
@@ -755,9 +863,6 @@ int main(int argc, char **argv) {
       mapZoom = 22;
 
     if (ImGui::Button("Fetch Data")) {
-      wmApiKey = wmKeyBuf;
-      aqApiKey = aqKeyBuf;
-      mbApiKey = mbKeyBuf;
 
       std::vector<double> gridLats;
       std::vector<double> gridLons;

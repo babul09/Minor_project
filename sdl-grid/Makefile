@@ -67,7 +67,7 @@ setup:
 $(TARGET): $(SRC)
 	$(CXX) $(CXXFLAGS) $(IMGUI_DEFINES) -o $@ $^ $(LDFLAGS)
 
-test: src/test_main.cpp src/api_client.cpp
+test: src/test_main.cpp src/api_client.cpp src/grid.cpp src/particle.cpp src/boundary.cpp
 	$(CXX) $(CXXFLAGS) -o run_tests $^ $(LDFLAGS)
 	./run_tests
 
