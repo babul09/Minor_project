@@ -44,8 +44,9 @@ int main() {
   // Test Basic Physics step
   ps.emitting = false;
   Boundary b(10, 10);
+  std::vector<std::pair<float, float>> test_emitters;
   // Spawn one manually if we can, or just check update doesn't crash
-  ps.update(0.1f, 0.0f, 0.0f, b, rect);
+  ps.update(0.1f, test_emitters, b, rect);
 
   std::cout << "ParticleSystem init and update OK.\n";
 

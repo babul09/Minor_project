@@ -1,6 +1,7 @@
 #include "particle.h"
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 #include <random>
 
 namespace {
@@ -229,16 +230,18 @@ void ParticleSystem::getWindAt(float x, float y, float &wx, float &wy) const {
   }
 }
 
-void ParticleSystem::update(float dt, float emit_x, float emit_y,
-                            const Boundary &boundary,
-                            const GridRect &gridRect) {
+void ParticleSystem::update(
+    float dt, const std::vector<std::pair<float, float>> &emitters,
+    const Boundary &boundary, const GridRect &gridRect) {
   // Spawn particles if emitting
-  if (emitting && spawnRate > 0.0f) {
+  if (emitting && spawnRate > 0.0f && !emitters.empty()) {
     const float to_spawn = spawnRate * dt + spawnAcc;
     const int n = static_cast<int>(to_spawn);
     spawnAcc = to_spawn - n;
     for (int i = 0; i < n; ++i) {
-      spawnOne(emit_x, emit_y);
+      // Pick a random emitter wrapper
+      int eIdx = rand() % emitters.size();
+      spawnOne(emitters[eIdx].first, emitters[eIdx].second);
     }
   }
 
@@ -389,4 +392,33 @@ void ParticleSystem::accumulateGrid(const GridRect &gridRect, int rows,
       continue;
     outCounts[row * cols + col] += 1;
   }
+}
+
+void ParticleSystem::populateRandomly(const Boundary &boundary,
+                                      const GridRect &gridRect) {
+  int spawns = 0;
+  for (int i = 0; i < maxParticles; ++i) {
+    if (particles[i].life <= 0.0f) {
+      // Find a valid random point within grid bounds
+      float rx = gridRect.x + randf() * gridRect.w;
+      float ry = gridRect.y + randf() * gridRect.h;
+
+      // Only spawn if inside requested boundary
+      if (boundary.contains(rx, ry, gridRect)) {
+        particles[i].x = rx;
+        particles[i].y = ry;
+
+        // Assign a small random drift velocity
+        float ang = randf() * TWO_PI;
+        const float speed =
+            emitterSpeedMin + randf() * (emitterSpeedMax - emitterSpeedMin);
+        particles[i].vx = std::cos(ang) * speed * 0.1f;
+        particles[i].vy = std::sin(ang) * speed * 0.1f;
+        particles[i].life = particleLife * (0.5f + randf() * 1.0f);
+        spawns++;
+      }
+    }
+  }
+  std::cout << "Randomly scattered " << spawns
+            << " particles across the grid map.\n";
 }

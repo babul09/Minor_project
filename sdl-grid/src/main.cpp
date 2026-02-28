@@ -172,11 +172,17 @@ int main(int argc, char **argv) {
   // Emitter UI & interaction state
   bool emitterSettingsOpen = false;
   float emitterWindowPosX = 100.0f, emitterWindowPosY = 100.0f;
-  float emitterX = grid.centerX(window_w, window_h); // Emitter world position
-  float emitterY = grid.centerY(window_w, window_h);
-  bool draggingEmitter = false;
+
+  std::vector<std::pair<float, float>> emitters;
+  emitters.push_back(
+      {grid.centerX(window_w, window_h), grid.centerY(window_w, window_h)});
+
+  int draggingEmitterIndex = -1;
   bool emitterWasDragged = false;
   bool emitterEditMode = false; // E to toggle; arrows move when enabled
+
+  // Simulation Controls
+  bool isPaused = false;
 
   // Accumulation buffers sized to the configured grid
   std::vector<float> accum(rows * cols, 0.0f);
@@ -245,11 +251,13 @@ int main(int argc, char **argv) {
           SDL_GetWindowSize(window, &tmp_w, &tmp_h);
           float cx_tmp = grid.centerX(tmp_w, tmp_h);
           float cy_tmp = grid.centerY(tmp_w, tmp_h);
-          emitterX = (mx - cx_tmp) / view_scale + cx_tmp;
-          emitterY = (my - cy_tmp) / view_scale + cy_tmp;
+          float cx_tmp2 = grid.centerX(tmp_w, tmp_h);
+          float cy_tmp2 = grid.centerY(tmp_w, tmp_h);
+          emitters.push_back({(mx - cx_tmp2) / view_scale + cx_tmp2,
+                              (my - cy_tmp2) / view_scale + cy_tmp2});
         } else if (k == SDLK_UP) {
-          if (emitterEditMode) {
-            emitterY -= 8.0f;
+          if (emitterEditMode && !emitters.empty()) {
+            emitters.back().second -= 8.0f;
           } else {
             float wx, wy;
             ps.getWindBase(wx, wy);
@@ -257,8 +265,8 @@ int main(int argc, char **argv) {
             ps.setWindBase(wx, wy);
           }
         } else if (k == SDLK_DOWN) {
-          if (emitterEditMode) {
-            emitterY += 8.0f;
+          if (emitterEditMode && !emitters.empty()) {
+            emitters.back().second += 8.0f;
           } else {
             float wx, wy;
             ps.getWindBase(wx, wy);
@@ -266,8 +274,8 @@ int main(int argc, char **argv) {
             ps.setWindBase(wx, wy);
           }
         } else if (k == SDLK_LEFT) {
-          if (emitterEditMode) {
-            emitterX -= 8.0f;
+          if (emitterEditMode && !emitters.empty()) {
+            emitters.back().first -= 8.0f;
           } else {
             float wx, wy;
             ps.getWindBase(wx, wy);
@@ -275,8 +283,8 @@ int main(int argc, char **argv) {
             ps.setWindBase(wx, wy);
           }
         } else if (k == SDLK_RIGHT) {
-          if (emitterEditMode) {
-            emitterX += 8.0f;
+          if (emitterEditMode && !emitters.empty()) {
+            emitters.back().first += 8.0f;
           } else {
             float wx, wy;
             ps.getWindBase(wx, wy);
@@ -298,7 +306,7 @@ int main(int argc, char **argv) {
           if (boundaryEditMode && !uiWantsMouse()) {
             // start marking or clearing boundary cells
             draggingBoundary = true;
-            boundaryMarkValue = (e.button.button == SDL_BUTTON_LEFT);
+            boundaryMarkValue = (e.button.button != SDL_BUTTON_LEFT);
             int r, c;
             if (boundary.cellAt(world_x, world_y,
                                 grid.computeGridRect(tmp_w, tmp_h), r, c)) {
@@ -306,18 +314,32 @@ int main(int argc, char **argv) {
             }
           } else {
             // Handle emitter / circle placement as before
-            const float dx_e = world_x - emitterX;
-            const float dy_e = world_y - emitterY;
             const float clickThresh =
                 std::max(8.0f, ps.getEmitterRadius() * 0.5f);
 
-            if (!uiWantsMouse() &&
-                (dx_e * dx_e + dy_e * dy_e) < (clickThresh * clickThresh)) {
-              draggingEmitter = true;
-              emitterWasDragged = false;
-            } else if (!uiWantsMouse() && e.button.button == SDL_BUTTON_LEFT) {
-              // Place a collision circle
-              ps.addCircle(world_x, world_y, circle_radius);
+            bool clickedEmitter = false;
+            if (!uiWantsMouse()) {
+              for (size_t i = 0; i < emitters.size(); ++i) {
+                const float dx_e = world_x - emitters[i].first;
+                const float dy_e = world_y - emitters[i].second;
+                if ((dx_e * dx_e + dy_e * dy_e) < (clickThresh * clickThresh)) {
+                  draggingEmitterIndex = i;
+                  emitterWasDragged = false;
+                  clickedEmitter = true;
+                  break;
+                }
+              }
+            }
+
+            if (!clickedEmitter && !uiWantsMouse() &&
+                e.button.button == SDL_BUTTON_LEFT) {
+              if (emitterEditMode) {
+                // If in edit mode, add new emitter at click
+                emitters.push_back({world_x, world_y});
+              } else {
+                // Place a collision circle
+                ps.addCircle(world_x, world_y, circle_radius);
+              }
             }
           }
         }
@@ -326,7 +348,7 @@ int main(int argc, char **argv) {
           ps.clearCircles();
         }
       } else if (e.type == SDL_MOUSEMOTION) {
-        if (draggingEmitter && (e.motion.state & SDL_BUTTON_LMASK) &&
+        if (draggingEmitterIndex >= 0 && (e.motion.state & SDL_BUTTON_LMASK) &&
             !boundaryEditMode) {
           int tmp_w, tmp_h;
           SDL_GetWindowSize(window, &tmp_w, &tmp_h);
@@ -334,8 +356,10 @@ int main(int argc, char **argv) {
           const float cy_tmp = grid.centerY(tmp_w, tmp_h);
           const float world_x = (e.motion.x - cx_tmp) / view_scale + cx_tmp;
           const float world_y = (e.motion.y - cy_tmp) / view_scale + cy_tmp;
-          emitterX = world_x;
-          emitterY = world_y;
+          if (static_cast<size_t>(draggingEmitterIndex) < emitters.size()) {
+            emitters[draggingEmitterIndex].first = world_x;
+            emitters[draggingEmitterIndex].second = world_y;
+          }
           emitterWasDragged = true;
         }
         if (draggingBoundary &&
@@ -353,14 +377,14 @@ int main(int argc, char **argv) {
           }
         }
       } else if (e.type == SDL_MOUSEBUTTONUP) {
-        if (e.button.button == SDL_BUTTON_LEFT && draggingEmitter) {
-          draggingEmitter = false;
+        if (e.button.button == SDL_BUTTON_LEFT && draggingEmitterIndex != -1) {
           if (!emitterWasDragged) {
             // Treat as a click: open popup
             emitterSettingsOpen = !emitterSettingsOpen;
             emitterWindowPosX = static_cast<float>(e.button.x);
             emitterWindowPosY = static_cast<float>(e.button.y);
           }
+          draggingEmitterIndex = -1;
         }
         if ((e.button.button == SDL_BUTTON_LEFT ||
              e.button.button == SDL_BUTTON_RIGHT) &&
@@ -468,8 +492,14 @@ int main(int argc, char **argv) {
     GridRect baseR = grid.computeGridRect(win_w, win_h);
 
     // Update emitter position and particle system (respecting boundary)
-    ps.setWindCenter(emitterX, emitterY);
-    ps.update(dt, emitterX, emitterY, boundary, baseR);
+    if (!emitters.empty()) {
+      ps.setWindCenter(emitters[0].first,
+                       emitters[0].second); // default vortex to first emitter
+    }
+
+    if (!isPaused) {
+      ps.update(dt, emitters, boundary, baseR);
+    }
 
     grid.draw(renderer, win_w, win_h, view_scale);
 
@@ -642,41 +672,44 @@ int main(int argc, char **argv) {
     ps.render(renderer, psize, view_scale, grid.centerX(win_w, win_h),
               grid.centerY(win_w, win_h));
 
-    // Draw wind vector at emitter location
-    float wx_e, wy_e;
-    ps.getWindAt(emitterX, emitterY, wx_e, wy_e);
-    SDL_SetRenderDrawColor(renderer, 255, 255, 100, 255);
+    // Draw wind vector at emitter locations
+    for (size_t i = 0; i < emitters.size(); ++i) {
+      float wx_e, wy_e;
+      ps.getWindAt(emitters[i].first, emitters[i].second, wx_e, wy_e);
+      SDL_SetRenderDrawColor(renderer, 255, 255, 100, 255);
 
-    const float cx = grid.centerX(win_w, win_h);
-    const float cy = grid.centerY(win_w, win_h);
-    const int sx_emit_x =
-        static_cast<int>(std::floor((emitterX - cx) * view_scale + cx + 0.5f));
-    const int sx_emit_y =
-        static_cast<int>(std::floor((emitterY - cy) * view_scale + cy + 0.5f));
-    const float end_world_x = emitterX + wx_e * wind_vis_scale;
-    const float end_world_y = emitterY + wy_e * wind_vis_scale;
-    const int sx_end_x = static_cast<int>(
-        std::floor((end_world_x - cx) * view_scale + cx + 0.5f));
-    const int sx_end_y = static_cast<int>(
-        std::floor((end_world_y - cy) * view_scale + cy + 0.5f));
-    SDL_RenderDrawLine(renderer, sx_emit_x, sx_emit_y, sx_end_x, sx_end_y);
+      const float cx = grid.centerX(win_w, win_h);
+      const float cy = grid.centerY(win_w, win_h);
+      const int sx_emit_x = static_cast<int>(
+          std::floor((emitters[i].first - cx) * view_scale + cx + 0.5f));
+      const int sx_emit_y = static_cast<int>(
+          std::floor((emitters[i].second - cy) * view_scale + cy + 0.5f));
+      const float end_world_x = emitters[i].first + wx_e * wind_vis_scale;
+      const float end_world_y = emitters[i].second + wy_e * wind_vis_scale;
+      const int sx_end_x = static_cast<int>(
+          std::floor((end_world_x - cx) * view_scale + cx + 0.5f));
+      const int sx_end_y = static_cast<int>(
+          std::floor((end_world_y - cy) * view_scale + cy + 0.5f));
+      SDL_RenderDrawLine(renderer, sx_emit_x, sx_emit_y, sx_end_x, sx_end_y);
 
-    // Draw emitter radius boundary + center marker
-    SDL_SetRenderDrawColor(renderer, 200, 120, 120, 255);
-    const int emitter_sr_screen =
-        std::max(1, static_cast<int>(
-                        std::floor(ps.getEmitterRadius() * view_scale + 0.5f)));
-    drawCircleOutline(renderer, sx_emit_x, sx_emit_y, emitter_sr_screen);
+      // Draw emitter radius boundary + center marker
+      SDL_SetRenderDrawColor(renderer, 200, 120, 120, 255);
+      const int emitter_sr_screen =
+          std::max(1, static_cast<int>(std::floor(
+                          ps.getEmitterRadius() * view_scale + 0.5f)));
+      drawCircleOutline(renderer, sx_emit_x, sx_emit_y, emitter_sr_screen);
 
-    // Small filled center
-    SDL_SetRenderDrawColor(renderer, 220, 80, 80, 255);
-    SDL_Rect er = {sx_emit_x - 3, sx_emit_y - 3, 6, 6};
-    SDL_RenderFillRect(renderer, &er);
+      // Small filled center
+      SDL_SetRenderDrawColor(renderer, 220, 80, 80, 255);
+      SDL_Rect er = {sx_emit_x - 3, sx_emit_y - 3, 6, 6};
+      SDL_RenderFillRect(renderer, &er);
 
-    if (emitterEditMode) {
-      // Highlight when edit mode is active
-      SDL_SetRenderDrawColor(renderer, 255, 200, 120, 255);
-      drawCircleOutline(renderer, sx_emit_x, sx_emit_y, emitter_sr_screen + 4);
+      if (emitterEditMode) {
+        // Highlight when edit mode is active
+        SDL_SetRenderDrawColor(renderer, 255, 200, 120, 255);
+        drawCircleOutline(renderer, sx_emit_x, sx_emit_y,
+                          emitter_sr_screen + 4);
+      }
     }
 
 #ifdef USE_IMGUI
@@ -709,8 +742,8 @@ int main(int argc, char **argv) {
       float s = ps.getWindStrength();
       if (ImGui::SliderFloat("Vortex strength", &s, 0.0f, 2000.0f))
         ps.setWindStrength(s);
-      if (ImGui::Button("Center = emitter"))
-        ps.setWindCenter(emitterX, emitterY);
+      if (ImGui::Button("Center = emitter") && !emitters.empty())
+        ps.setWindCenter(emitters[0].first, emitters[0].second);
     } else if (wind_mode_ui == ParticleSystem::WIND_NOISE) {
       float a, sc, sp;
       ps.getNoiseParams(a, sc, sp);
@@ -764,6 +797,12 @@ int main(int argc, char **argv) {
       j["ps"]["noiseScale"] = sc;
       j["ps"]["noiseSpeed"] = sp;
 
+      json eList = json::array();
+      for (const auto &e : emitters) {
+        eList.push_back({{"x", e.first}, {"y", e.second}});
+      }
+      j["emitters"] = eList;
+
       std::ofstream o(path);
       o << std::setw(4) << j << std::endl;
       std::cout << "Saved config to " << path << "\n";
@@ -799,6 +838,15 @@ int main(int argc, char **argv) {
           sc = j["ps"].value("noiseScale", sc);
           sp = j["ps"].value("noiseSpeed", sp);
           ps.setNoiseParams(a, sc, sp);
+        }
+
+        if (j.contains("emitters") && j["emitters"].is_array()) {
+          emitters.clear();
+          for (const auto &e : j["emitters"]) {
+            if (e.contains("x") && e.contains("y")) {
+              emitters.push_back({e["x"].get<float>(), e["y"].get<float>()});
+            }
+          }
         }
 
         // Auto-fetch data
@@ -926,23 +974,32 @@ int main(int argc, char **argv) {
     if (ImGui::Button("Clear circles"))
       ps.clearCircles();
     ImGui::Separator();
-    ImGui::Text("Emitter: (click/drag to move)");
-    ImGui::Text("Position: %.1f, %.1f", emitterX, emitterY);
+    ImGui::Text("Simulation Controls");
+    ImGui::Checkbox("Pause Simulation (Space)", &isPaused);
     ImGui::SameLine();
-    if (ImGui::Button("Center emitter")) {
-      emitterX = grid.centerX(win_w, win_h);
-      emitterY = grid.centerY(win_w, win_h);
-      ps.setWindCenter(emitterX, emitterY);
+    if (ImGui::Button("Populate Grid Randomly")) {
+      GridRect baseR = grid.computeGridRect(win_w, win_h);
+      ps.populateRandomly(boundary, baseR);
+    }
+    ImGui::Separator();
+    ImGui::Text("Emitters: %zu (click/drag to move)", emitters.size());
+    if (ImGui::Button("Add Emitter at Center")) {
+      emitters.push_back(
+          {grid.centerX(win_w, win_h), grid.centerY(win_w, win_h)});
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Clear All Emitters")) {
+      emitters.clear();
     }
     ImGui::Checkbox("Emitter edit mode (E)", &emitterEditMode);
-    if (ImGui::Button("Set emitter to mouse (A)")) {
+    if (ImGui::Button("Set First Emitter to mouse (A)") && !emitters.empty()) {
       int mx, my;
       SDL_GetMouseState(&mx, &my);
       float cx_tmp = grid.centerX(win_w, win_h);
       float cy_tmp = grid.centerY(win_w, win_h);
-      emitterX = (mx - cx_tmp) / view_scale + cx_tmp;
-      emitterY = (my - cy_tmp) / view_scale + cy_tmp;
-      ps.setWindCenter(emitterX, emitterY);
+      emitters[0].first = (mx - cx_tmp) / view_scale + cx_tmp;
+      emitters[0].second = (my - cy_tmp) / view_scale + cy_tmp;
+      ps.setWindCenter(emitters[0].first, emitters[0].second);
     }
     ImGui::End();
 

@@ -130,10 +130,14 @@ public:
 
   // Core simulation methods
   void clear() noexcept;
-  // dt: time step, emit_x/emit_y: emitter world position
+  // dt: time step, emitters: list of active emitter world positions
   // boundary: containment region, gridRect used to map positions to cells
-  void update(float dt, float emit_x, float emit_y, const Boundary &boundary,
-              const GridRect &gridRect);
+  void update(float dt, const std::vector<std::pair<float, float>> &emitters,
+              const Boundary &boundary, const GridRect &gridRect);
+
+  // Instantly spawns particles across the entire grid mapping for visualizing
+  // paths
+  void populateRandomly(const Boundary &boundary, const GridRect &gridRect);
 
   // Render with view scale and center for proper zoom support
   void render(SDL_Renderer *renderer, int psize, float scale = 1.0f,

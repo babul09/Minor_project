@@ -2,6 +2,24 @@
     "accumAutoScale": true,
     "accumDecay": 1.0,
     "accumMaxDisplay": 50.0,
+    "emitters": [
+        {
+            "x": 854.0,
+            "y": 1319.0
+        },
+        {
+            "x": 304.0,
+            "y": 1050.0
+        },
+        {
+            "x": 1886.0,
+            "y": 1240.0
+        },
+        {
+            "x": 388.0,
+            "y": 460.0
+        }
+    ],
     "locLat": 12.853722,
     "locLon": 80.069193,
     "mapZoom": 15,
@@ -17,5 +35,5 @@
     "showAccumulation": true,
     "showWindField": true,
     "view_scale": 1.0,
-    "wind_vis_scale": 0.026000000536441803
+    "wind_vis_scale": 0.07000000029802322
 }
